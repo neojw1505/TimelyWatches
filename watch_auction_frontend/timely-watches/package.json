@@ -1,0 +1,53 @@
+{
+  "name": "timely-watches",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --fix --ignore-path .gitignore"
+  },
+  "dependencies": {
+    "@aws-amplify/auth": "^6.0.24",
+    "@aws-amplify/core": "^6.0.24",
+    "@aws-sdk/client-s3": "^3.540.0",
+    "@mdi/font": "7.4.47",
+    "@syncfusion/ej2-base": "^25.1.35",
+    "@syncfusion/ej2-vue-calendars": "^25.1.37",
+    "aws-sdk": "^2.1588.0",
+    "axios": "^1.6.8",
+    "bootstrap": "^5.3.3",
+    "core-js": "^3.36.1",
+    "cors": "^2.8.5",
+    "flatpickr": "^4.6.13",
+    "husky": "^9.0.11",
+    "pinia": "^2.1.7",
+    "pinia-persist": "^0.1.0",
+    "pinia-plugin-persist": "^1.0.0",
+    "roboto-fontface": "*",
+    "spark-md5": "^3.0.2",
+    "typescript": "^5.4.3",
+    "uuid": "^9.0.1",
+    "vite": "^5.2.6",
+    "vite-plugin-vuetify": "^2.0.3",
+    "vue": "^3.4.21",
+    "vue-cal": "^4.8.1",
+    "vue-flatpickr-component": "^11.0.5",
+    "vue-router": "^4.3.0",
+    "vue-stripe-checkout": "^3.5.15",
+    "vuetify": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "dotenv": "^16.4.5",
+    "dotenv-webpack": "^8.1.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-vue": "^9.24.0",
+    "sass": "^1.72.0",
+    "sass-loader": "^14.1.1",
+    "unplugin-fonts": "^1.1.1",
+    "vite": "^5.2.6",
+    "vite-plugin-vuetify": "^2.0.3"
+  }
+}

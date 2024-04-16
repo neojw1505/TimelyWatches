@@ -1,0 +1,173 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  ###################################### UserAPI ######################################
+  - name: UserAPI
+    url: http://user:5000/user
+    routes:
+      - name: UserRoutes ##
+        paths:
+          - /user
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+  ###################################### NotificationAPI ######################################
+  - name: NotificationAPI
+    url: http://notification:5004/notification
+    routes:
+      - name: NotificationRoutes ##
+        paths:
+          - /notification
+        methods:
+          - GET
+          - POST
+          - OPTIONS
+  ###################################### AuctionAPI ######################################
+  - name: AuctionAPI
+    url: http://AuctionAPIupstream.service/auction
+    routes:
+      - name: AuctionRoutes ##
+        paths:
+          - /auction
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+  ###################################### BidAPI ######################################
+  - name: BidAPI
+    url: http://BidAPIupstream.service/bid
+    routes:
+      - name: BidRoutes ##
+        paths:
+          - /bid
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+  ###################################### ScheduleAPI ######################################
+  - name: ScheduleAPI
+    url: http://schedule:5003/schedule
+    routes:
+      - name: ScheduleRoutes ##
+        paths:
+          - /schedule
+        methods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+  ###################################### CreateAuctionAPI ######################################
+  - name: CreateAuctionAPI
+    url: http://createAuction:5010/createAuction
+    routes:
+      - name: CreateAuctionRoutes ##
+        paths:
+          - /createAuction
+        methods:
+          - POST
+          - OPTIONS
+        strip_path: true
+        
+###################################### s3API ######################################
+  - name: s3
+    url: http://s3:5102/s3
+    routes:
+      - name: uploadS3 ##
+        paths:
+          - /s3
+        methods:
+          - POST
+          - OPTIONS
+
+###################################### ProcessBidAPI ######################################
+  - name: ProcessBidAPI
+    url: http://processbid:5006/processbid
+    routes:
+      - name: ProcessBid ##
+        paths:
+          - /processbid
+        methods:
+          - GET
+          - POST
+          - OPTIONS
+###################################### ProcessBidAPI ######################################
+  - name: PricePredictorAPI
+    url: http://pricePredictor:5008/pricePredictor
+    routes:
+      - name: pricePredictor ##
+        paths:
+          - /pricePredictor
+        methods:
+          - GET
+          - OPTIONS
+
+  ###################################### TEST Kong's Echo ######################################
+  # - name: echo-service
+  #   url: http://localhost:8000
+
+###################################### UPSTREAMS ######################################
+upstreams:
+  - name: BidAPIupstream.service
+    algorithm: round-robin
+    targets:
+      - target: bid1:5002
+        weight: 100
+      - target: bid2:5002
+        weight: 100
+
+  - name: AuctionAPIupstream.service
+    algorithm: round-robin
+    targets:
+      - target: auction1:5001
+        weight: 100
+      - target: auction2:5001
+        weight: 100
+
+###################################### Plugins ######################################
+plugins:
+  - name: prometheus
+    enabled: true
+    config:
+      bandwidth_metrics: true
+      latency_metrics: true
+      per_consumer: true
+      status_code_metrics: true
+      upstream_health_metrics: true
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - PATCH
+        - OPTIONS
+      headers:
+        - Accept
+        - Accept-Version
+        - Content-Length
+        - Content-MD5
+        - Content-Type
+        - Date
+        - X-Auth-Token
+      exposed_headers:
+        - X-Auth-Token
+      credentials: true
+      max_age: 3600
+###################################### TEST Kong's Echo Route ######################################
+# routes:
+#   - name: echo-route
+#     paths:
+#       - /echo
+#     service: echo-service

@@ -1,0 +1,531 @@
+version: "3.8"
+
+volumes:
+  rabbitmq_data:
+  pgdata: 
+  prometheusdata:
+  grafanadata:
+  
+networks:
+  kong-net:
+    driver: bridge
+    name: kong-net
+
+services:
+
+################################################## KONG API Gateway ##################################################
+
+  #######################################
+  # Postgres: The database used by Kong
+  #######################################
+  kong-database:
+    image: postgres:15 # tested 20231101; Ref: https://docs.konghq.com/gateway/latest/support/third-party/
+    platform: linux/amd64  # <- required for Mac M1 chip. Otherwise, can remove
+    restart: always
+    networks:
+      - kong-net
+    environment:
+      POSTGRES_DB: kong
+      POSTGRES_USER: kong
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "kong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  #######################################
+  # Kong database migration
+  #######################################
+  kong-migration:
+    image: kong/kong-gateway:3.2.2.5 # tested 20231101
+    platform: linux/amd64  # <- required for Mac M1 chip. Otherwise, can remove
+    command: "kong migrations bootstrap"
+    restart: on-failure
+    networks:
+      - kong-net
+    environment:
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: password
+    depends_on:
+      - kong-database
+
+  #######################################
+  # Kong: The API Gateway
+  #######################################
+  kong:
+    image: kong/kong-gateway:3.2.2.5 # tested 20231101
+    platform: linux/amd64  # <- required for Mac M1 chip. Otherwise, can remove
+    restart: always
+    networks:
+      - kong-net
+    environment:
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_DATABASE: postgres
+      KONG_PG_HOST: kong-database
+      KONG_PG_USER: kong
+      KONG_PG_PASSWORD: password
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ADMIN_GUI_URL: http://localhost:8002
+    depends_on:
+      - kong-migration
+    ports: # https://docs.konghq.com/gateway/latest/production/networking/default-ports/
+      - "8000:8000" # Takes incoming HTTP traffic from Consumers, and forwards it to upstream Services.
+      - "8443:8443" # Takes incoming HTTPS traffic from Consumers, and forwards it to upstream Services.
+      - "8001:8001" # Admin API. Listens for calls from the command line over HTTP.
+      - "8444:8444" # Admin API. Listens for calls from the command line over HTTPS.
+      - "8002:8002" # Kong Manager (GUI). Listens for HTTP traffic.
+      - "8445:8445" # Kong Manager (GUI). Listens for HTTPS traffic.
+      - "8003:8003" # Dev Portal. Listens for HTTP traffic, assuming Dev Portal is enabled.
+      - "8446:8446" # Dev Portal. Listens for HTTP traffic, assuming Dev Portal is enabled.
+      - "8004:8004" # Dev Portal /files traffic over HTTPS, assuming the Dev Portal is enabled.
+      - "8447:8447" # Dev Portal /files traffic over HTTPS, assuming the Dev Portal is enabled.
+    volumes:
+      - ./kong/declarative/kong.yml:/etc/kong/kong.yml
+    command: >
+      /bin/sh -c "
+        kong config db_import /etc/kong/kong.yml &&
+        kong start
+      "
+
+
+ 
+################################################## Microservices  ##################################################
+
+
+  ###################################
+  # Notification: The Notification microservice
+  ###################################
+  notification:
+    build:
+      context: ./Notification
+      dockerfile: notification.dockerfile
+    image: ethantfw/notification:esd
+    restart: always
+    environment:
+      dbURL: "mysql+mysqlconnector://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:3306/Notification"
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5004:5004"
+    networks:
+      - kong-net
+
+  ####################################
+  # RabbitMQ: The messaging broker   
+  ####################################
+  rabbitmq:
+    image: rabbitmq:3-management
+    hostname: esd-rabbit
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes: 
+      - ./rabbitmq.config:/etc/rabbitmq/rabbitmq.config
+      - ./rabbitmq_definitions.json:/etc/rabbitmq/rabbitmq_definitions.json
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - kong-net
+
+  ###################################
+  # User: The User microservice
+  ###################################
+  user:
+    build:
+      context: ./Users
+      dockerfile: user.dockerfile
+    image: ethantfw/user:esd
+    restart: always
+    environment:
+      dbURL: "mysql+mysqlconnector://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:3306/Users"
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5000:5000"
+    networks:
+      - kong-net
+
+  ###################################
+  # s3: The User microservice
+  ###################################
+  s3:
+    build:
+      context: ./s3
+      dockerfile: s3.dockerfile
+    image: ethantfw/s3:esd
+    restart: always
+    environment:
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5102:5102"
+    networks:
+      - kong-net
+
+
+  ###################################
+  # Auction: The Auction1 microservice
+  ###################################
+  auction1:
+    build:
+      context: ./Auction
+      dockerfile: auction.dockerfile
+    image: ethantfw/auction:esd
+    container_name: auction1
+    restart: always
+    environment:
+      dbURL: "mysql+mysqlconnector://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:3306/Auction"
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5001:5001"
+    networks:
+      - kong-net
+    
+  ###################################
+  # Auction: The Auction2 microservice
+  ###################################
+  auction2:
+    build:
+      context: ./Auction
+      dockerfile: auction.dockerfile
+    image: ethantfw/auction:esd
+    container_name: auction2
+    restart: always
+    environment:
+      dbURL: "mysql+mysqlconnector://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:3306/Auction"
+      PYTHONUNBUFFERED: 1
+    networks:
+      - kong-net
+
+  ###################################
+  # Bid: The bid1 microservice
+  ###################################
+  bid1:
+    build:
+      context: ./Bids
+      dockerfile: bids.dockerfile
+    image: ethantfw/bid:esd
+    restart: always
+    environment:
+      dbURL: "mysql+mysqlconnector://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:3306/bids"
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5002:5002"
+    networks:
+      - kong-net
+
+  ###################################
+  # Bid: The bid2 microservice
+  ###################################
+  bid2:
+    build:
+      context: ./Bids
+      dockerfile: bids.dockerfile
+    image: ethantfw/bid:esd
+    restart: always
+    environment:
+      dbURL: "mysql+mysqlconnector://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:3306/bids"
+      PYTHONUNBUFFERED: 1
+    networks:
+      - kong-net
+
+  ###################################
+  # Schedule: The Schedule microservice
+  ###################################
+  schedule:
+    build:
+      context: ./Schedule
+      dockerfile: schedule.dockerfile
+    image: ethantfw/schedule:esd
+    restart: always
+    environment:
+      dbURL: "mysql+mysqlconnector://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:3306/Schedule"
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5003:5003"
+    networks:
+      - kong-net
+
+
+  #################################################
+  # pricePredictor: The pricePredictor microservice 
+  #################################################
+  pricePredictor:
+    build:
+      context: ./PricePredictor
+      dockerfile: pricePredictor.dockerfile
+    image: ethantfw/pricepredictor:esd
+    restart: always
+    environment:      
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5008:5008"
+    networks:
+      - kong-net
+
+  #################################################
+  # createNotification: The createNotification microservice (complex)
+  #################################################
+  createNotification:
+    build:
+      context: ./createNotification
+      dockerfile: createNotification.dockerfile
+    image: ethantfw/createnotification:esd
+    restart: always
+    depends_on:
+      - rabbitmq
+      - user
+      - auction1
+      - auction2
+      - notification
+      - schedule
+    environment:
+      rabbit_host: rabbitmq
+      rabbit_port: 5672
+      a_queue_name: Notification
+      user_url: http://user:5000/user
+      auction_url: http://nginx_auction/auction
+      notification_url: http://notification:5004/notification 
+      schedule_url: http://schedule:5003/schedule  
+      emailservice_url: http://emailservice:5104/emailservice  
+      PYTHONUNBUFFERED: 1
+    networks:
+      - kong-net
+
+
+  #################################################
+  # test: The test microservice (complex)
+  #################################################
+  test:
+    build:
+      context: ./
+      dockerfile: test.dockerfile
+    image: ethantfw/test:esd
+    restart: always
+    depends_on:
+      - rabbitmq
+      - user
+      - auction1
+      - auction2
+      - notification
+    environment:
+      rabbit_host: rabbitmq
+      rabbit_port: 5672
+      a_queue_name: Notification
+      user_url: http://user:5000/user
+      auction_url: http://nginx_auction/auction
+      notification_url: http://notification:5004/notification 
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5100:5100"
+    networks:
+      - kong-net
+
+  
+
+  #################################################
+  # createAuction: The createAuction microservice (complex)
+  #################################################
+  createAuction:
+    build:
+      context: ./CreateAuction
+      dockerfile: createAuction.dockerfile
+    image: ethantfw/createauction:esd
+    restart: always
+    depends_on:
+      - auction1
+      - auction2
+      - schedule
+      - rabbitmq
+    environment:      
+      rabbit_host: rabbitmq
+      rabbit_port: 5672
+      a_queue_name: Notification
+      auction_url: http://nginx_auction/auction
+      schedule_url: http://schedule:5003/schedule 
+      stripe_url: http://stripeService:5101/stripe
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5010:5010"
+    networks:
+      - kong-net
+
+
+
+
+  #################################################
+  # processBid: The processBid microservice (complex)
+  #################################################
+  processbid:
+    build:
+      context: ./ProcessBid
+      dockerfile: ProcessBid.dockerfile
+    image: ethantfw/processbid:esd
+    restart: always
+    depends_on:
+      - rabbitmq
+      - nginx_auction
+      - nginx_bids
+    environment:      
+      rabbit_host: rabbitmq
+      rabbit_port: 5672
+      a_queue_name: Notification
+      auction_url: http://nginx_auction/auction
+      bids_url: http://nginx_bids/bid
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5006:5006"
+    networks:
+      - kong-net
+
+
+  #################################################
+  # ProcessWinner: The ProcessWinner microservice (complex)
+  #################################################
+  processWinner:
+    build:
+      context: ./ProcessWinner
+      dockerfile: processWinner.dockerfile
+    image: ethantfw/processwinner:esd
+    restart: always
+    depends_on:
+      - rabbitmq
+      - nginx_auction
+      - nginx_bids
+    environment:      
+      rabbit_host: rabbitmq
+      rabbit_port: 5672
+      a_queue_name: Notification
+      auction_url: http://nginx_auction/auction
+      bids_url: http://nginx_bids/bid
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5005:5005"
+    networks:
+      - kong-net
+
+  #################################################
+  # ViteDocker: Front End Project Docker
+  #################################################
+
+  # viteDocker:
+  #   build:
+  #     context: watch_auction_frontend/timely-watches
+  #     dockerfile: vite.dockerfile
+  #   entrypoint: >
+  #     sh -c "rm -rf node_modules/.cache node_modules/.vite && npm run dev"
+  #   restart: always
+  #   image: ethantfw/vitefrontend:esd
+  #   ports:
+  #     - 3000:3000
+
+
+  #######################################
+  # Prometheus
+  #######################################
+
+  prometheus:
+    image: prom/prometheus:v2.49.1
+    restart: always
+    depends_on:
+      - kong
+    networks:
+      - kong-net
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheusdata:/etc/prometheus
+      - ./prometheus:/etc/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+  
+  #######################################
+  # Grafana Open Source
+  #######################################
+  grafana:
+    image: grafana/grafana-oss:10.2.3
+    restart: always
+    depends_on:
+      - kong
+    networks:
+      - kong-net
+    ports:
+      - "13000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafanadata:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+
+
+  # #######################################
+  # # nignx load balancer
+  # #######################################
+
+  nginx_auction:
+      build: ./nginxAuction
+      ports:
+         - 8080:80
+      depends_on:
+        - auction1
+        - auction2
+      volumes:
+        - "./nginxAuction/nginx.conf:/etc/nginx/nginx.conf"
+      networks:
+        - kong-net
+
+  nginx_bids:
+      build: ./nginxBid
+      ports:
+         - 8081:80
+      depends_on:
+        - bid1
+        - bid2
+      volumes:
+        - "./nginxBid/nginx.conf:/etc/nginx/nginx.conf"
+      networks:
+        - kong-net
+
+  ###################################
+  # emailservice: The emailservice service
+  ###################################
+  emailservice:
+    build:
+      context: ./Email-Service
+      dockerfile: emailservice.dockerfile
+    image: ethantfw/emailservice:esd
+    restart: always
+    environment:
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5104:5104"
+    networks:
+      - kong-net
+
+  ###################################
+  # stripeService: The strip wrapper service
+  ###################################
+  stripeService:
+    build:
+      context: ./StripeService
+      dockerfile: stripeService.dockerfile
+    image: ethantfw/stripeservice:esd
+    restart: always
+    environment:
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5101:5101"
+    networks:
+      - kong-net
